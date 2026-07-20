@@ -1,0 +1,11 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "enzoamaral-website-party",
+  "main": "party/index.ts",
+  "compatibility_date": "2026-01-01",
+  "durable_objects": {
+    "bindings": [{ "name": "Main", "class_name": "PresenceServer" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PresenceServer"] }],
+  "routes": [{ "pattern": "party.enzoamaral.com", "custom_domain": true }]
+}

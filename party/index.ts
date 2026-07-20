@@ -1,4 +1,9 @@
-import type * as Party from "partykit/server";
+import {
+  routePartykitRequest,
+  Server,
+  type Connection,
+  type WSMessage,
+} from "partyserver";
 import type { ClientMessage, Peer, Point, Trail, View } from "./protocol";
 import { COLORS, NAMES } from "./protocol";
 
@@ -17,20 +22,22 @@ interface ViewEvent {
   end: number | null;
 }
 
-export default class PresenceServer implements Party.Server {
+interface Env {
+  Main: unknown;
+}
+
+export class PresenceServer extends Server<Env> {
   peers = new Map<string, Peer>();
   buffers = new Map<string, Point[]>();
   views = new Map<string, ViewEvent[]>();
   rates = new Map<string, { count: number; start: number }>();
   trails: Trail[] = [];
 
-  constructor(readonly room: Party.Room) {}
-
   async onStart() {
-    this.trails = (await this.room.storage.get<Trail[]>("trails")) ?? [];
+    this.trails = (await this.ctx.storage.get<Trail[]>("trails")) ?? [];
   }
 
-  onConnect(connection: Party.Connection) {
+  onConnect(connection: Connection) {
     const peer: Peer = {
       id: connection.id,
       color: this.nextColor(),
@@ -46,13 +53,10 @@ export default class PresenceServer implements Party.Server {
         trails: this.freshTrails(),
       }),
     );
-    this.room.broadcast(JSON.stringify({ type: "join", peer }), [peer.id]);
+    this.broadcast(JSON.stringify({ type: "join", peer }), [peer.id]);
   }
 
-  onMessage(
-    raw: string | ArrayBuffer | ArrayBufferView,
-    sender: Party.Connection,
-  ) {
+  onMessage(sender: Connection, raw: WSMessage) {
     const peer = this.peers.get(sender.id);
     if (!peer || typeof raw !== "string" || raw.length > 256) return;
     if (!this.allowMessage(sender.id)) return;
@@ -95,18 +99,16 @@ export default class PresenceServer implements Party.Server {
       default:
         return;
     }
-    this.room.broadcast(JSON.stringify({ ...message, id: sender.id }), [
-      sender.id,
-    ]);
+    this.broadcast(JSON.stringify({ ...message, id: sender.id }), [sender.id]);
   }
 
-  async onClose(connection: Party.Connection) {
+  async onClose(connection: Connection) {
     const saved = this.saveTrail(connection.id);
     this.peers.delete(connection.id);
     this.buffers.delete(connection.id);
     this.views.delete(connection.id);
     this.rates.delete(connection.id);
-    this.room.broadcast(JSON.stringify({ type: "leave", id: connection.id }));
+    this.broadcast(JSON.stringify({ type: "leave", id: connection.id }));
     await saved;
   }
 
@@ -153,7 +155,7 @@ export default class PresenceServer implements Party.Server {
       views,
     };
     this.trails = [trail, ...this.freshTrails()].slice(0, TRAIL_KEEP);
-    return this.room.storage.put("trails", this.trails);
+    return this.ctx.storage.put("trails", this.trails);
   }
 
   freshTrails() {
@@ -179,6 +181,17 @@ export default class PresenceServer implements Party.Server {
     return randomItem(NAMES);
   }
 }
+
+const worker = {
+  async fetch(request: Request, env: Env) {
+    return (
+      (await routePartykitRequest(request, env)) ??
+      new Response("Not found", { status: 404 })
+    );
+  },
+};
+
+export default worker;
 
 function randomItem<T>(items: readonly T[]): T {
   return items[Math.floor(Math.random() * items.length)];
